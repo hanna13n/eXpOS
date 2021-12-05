@@ -1,0 +1,30 @@
+int main()
+{
+    decl
+        int fd,temp,temp2;
+        str filename,data;
+    enddecl
+    begin
+        temp=exposcall("Write",-2,"FileName:");
+        temp=exposcall("Read",-1,filename);
+        fd=exposcall("Open",filename);
+        temp=exposcall("Write",-2,fd);
+        if(fd == -1) then
+            temp=exposcall("Write",-2,"FileNotFound!");
+         
+        endif;
+        if((fd == -2) OR (fd == -3)) then
+            temp=exposcall("Write",-2,"Memory Full!");
+        endif;
+        if(fd > -1 AND fd < 8) then
+            temp=0;
+            temp=exposcall("Read",fd,data);
+            while(temp == 0) do               
+                temp2=exposcall("Write",-2,data);
+                temp=exposcall("Read",fd,data);
+            endwhile;
+        endif;
+        temp=exposcall("Close",fd);
+        return 0;
+    end
+}

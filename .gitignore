@@ -1,0 +1,16 @@
+*
+!download.sh
+!Makefile
+!README.md
+!.gitignore
+!nexfs-interface
+nexfs-interface/*
+!nexfs-interface/loadfiles
+!*l
+*l/*
+!*l/*_progs
+!*l/samples
+!*l/*_progs/*
+!*l/samples/*
+!.vscode
+!.vscode/*

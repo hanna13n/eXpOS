@@ -1,0 +1,225 @@
+alias curPCB R1;
+curPCB = PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*16;
+
+// // count switch to kernel mode
+// [75*512 + 3] = [75*512 + 3] + 1;
+
+alias userSP R0;
+userSP = SP;
+
+[curPCB + 13] = SP;
+SP = [curPCB + 11]*512 -1;
+
+multipush(R0,R1);
+// ACQUIRE_KERN_LOCK
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0,R1);
+
+alias syscallno R2;
+syscallno = [[(userSP-5)/512 *2 +PTBR] *512 + ((userSP-5)%512)];
+
+[curPCB + 9] = syscallno;
+
+alias retvalue R3;
+retvalue = [(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512);
+
+if(syscallno == 22) then // newusr
+
+    // only shell process of root user 
+    if([curPCB + 3] != 1 || [SYSTEM_STATUS_TABLE  + CORE*5 + 1] != 2) then                   // permission denied
+        [retvalue] = -2;
+        goto end;
+    endif;
+
+
+    alias username R4;
+    username = [[(userSP-4)/512 *2 +PTBR] *512 + ((userSP-4)%512)];
+
+    alias i R5;
+    alias utentry R6;
+    i = USER_TABLE;
+    utentry = -1;
+    while (i < USER_TABLE + 16 * 2) do
+
+        if([i] == username) then    // user already exists
+            [retvalue] = -1;
+            goto end;
+        endif;
+
+        if(utentry == -1 && [i] == -1) then
+            utentry = i;
+        endif;
+
+        i = i + 2;
+
+    endwhile;
+
+    // user table full
+    if(utentry == -1) then
+        [retvalue] = -3;
+        goto end;
+    endif;
+
+    alias password R7;
+    password = [[(userSP-3)/512 *2 +PTBR] *512 + ((userSP-3)%512)];
+    encrypt password;
+    // create user
+    [utentry] = username;
+    [utentry + 1] = password;
+
+    [retvalue] = 0;
+
+endif;
+
+if(syscallno == 23) then // remusr
+
+    // only shell process of root user 
+    if([curPCB + 3] != 1 || [SYSTEM_STATUS_TABLE  + CORE*5 + 1] != 2) then               // permission denied
+        [retvalue] = -2;
+        [curPCB + 9] = 0;
+        goto end;
+    endif;
+
+    alias username R4;
+    username = [[(userSP-4)/512 *2 +PTBR] *512 + ((userSP-4)%512)];
+
+    // root and kernel user cannot be removed : permission denied
+    if(username == "root" || username == "kernel") then
+        [retvalue] = -2;
+        goto end;   
+    endif;
+
+  
+    alias utentry R5;
+    utentry = USER_TABLE;
+    while (utentry < USER_TABLE + 16 * 2) do
+
+        if([utentry] == username) then    // user found
+            break;            
+        endif;
+
+        utentry = utentry + 2;
+    endwhile;
+
+    // user not found
+    if(utentry >= USER_TABLE + 16 * 2) then    
+        [retvalue] = -1;
+        goto end;
+    endif;
+
+    alias i R6;
+    i = ROOT_FILE + 3;
+    while (i < ROOT_FILE + 59*8 + 4) do
+
+        if([i] == username && [i-3] != -1) then    // file found
+            [retvalue] = -3;
+            goto end;
+        endif;
+
+        i = i + 8;
+    endwhile;
+
+    // remove user
+    [utentry] = -1;
+    [utentry + 1] = -1;
+
+    [retvalue] = 0;
+
+endif;
+
+if(syscallno ==  24) then   // Setpwd
+
+    // only shell
+    if([SYSTEM_STATUS_TABLE  + CORE*5 + 1] != 2) then  // permission denied
+        [retvalue] = -1;
+        goto end;
+    endif;
+
+    alias username R4;
+    username = [[(userSP-4)/512 *2 +PTBR] *512 + ((userSP-4)%512)];
+
+    alias utentry R5;
+    utentry = USER_TABLE;
+    while (utentry < USER_TABLE + 16 * 2) do
+        if([utentry] == username) then    // user found
+            break;
+        endif;
+        utentry = utentry + 2;
+    endwhile;
+
+    // user not found
+    if(utentry >= USER_TABLE + 16 * 2) then    
+        [retvalue] = -2;
+        goto end;
+    endif;
+
+    // only root or current user can change password
+    if([curPCB + 3] != (utentry - USER_TABLE)/2 && [curPCB + 3] != 1) then
+        [retvalue] = -1;
+        goto end;
+    endif;
+
+    alias password R6;
+    password = [[(userSP-3)/512 *2 +PTBR] *512 + ((userSP-3)%512)];
+    encrypt password;
+
+    // set password
+    [utentry + 1] = password;
+
+    [retvalue] = 0;
+
+endif;
+
+if(syscallno == 25) then    // getuname
+
+    alias uid R4;
+    uid = [[(userSP-4)/512 *2 +PTBR] *512 + ((userSP-4)%512)];
+
+    // invalid uid
+    if(uid < 0 || uid > 15) then
+        [retvalue] = -1;
+        goto end;
+    endif;
+
+    // invalid user table entry
+    if([USER_TABLE + uid * 2] == -1) then
+        [retvalue] = -1;
+        goto end;
+    endif;
+
+    [retvalue] = [USER_TABLE + uid * 2];
+
+endif;
+
+if(syscallno == 26) then    // getuid
+
+    alias username R4;
+    username = [[(userSP-4)/512 *2 +PTBR] *512 + ((userSP-4)%512)];
+
+    alias uid R5;
+    uid = 0;
+    while (uid < 16 ) do
+        if([USER_TABLE + uid*2] == username) then    // user found
+            [retvalue] = uid;
+            goto end;
+        endif;
+        uid = uid + 1;
+    endwhile;
+
+    // user not found
+    [retvalue] = -1;
+
+endif;
+
+end:
+    [curPCB + 9] = 0;
+    multipush(R0);
+    // RELEASE_LOCK
+    R1 = 4;
+    R2 = KERN_LOCK;
+    call ACCESS_CONTROL;
+    multipop(R0);
+    SP = userSP;
+
+    ireturn;

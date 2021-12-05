@@ -1,0 +1,8 @@
+//Idle2 UserStack
+[83*512] = [69*512+1];
+
+PTBR = PAGE_TABLE_BASE + 20*14;
+PTLR = 10;
+SP = 8*512;
+
+ireturn;

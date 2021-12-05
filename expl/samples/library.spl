@@ -1,0 +1,4 @@
+if ( [SP-5]=="Write") then
+	[SP-5]=5;
+	call INT_7;
+endif;

@@ -1,0 +1,189 @@
+alias curPCB R4;
+curPCB = PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*16;
+
+
+// // count switch to kernel mode
+// [75*512 + 3] = [75*512 + 3] + 1;
+
+
+[curPCB + 9] = 8;
+alias userSP R0;
+userSP = SP;
+
+[curPCB + 13] = SP;
+SP = [curPCB +11] *512 -1;
+
+multipush(R0,R4);
+// ACQUIRE_KERN_LOCK
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0,R4);
+
+alias newPID R1;
+
+//GET_PCB_ENTRY
+multipush(R0,R4);
+R1=1;
+call PROCESS_MANAGER;
+newPID=R0;
+multipop(R0,R4);
+
+if(newPID==-1) then
+
+    [curPCB + 9] = 0;
+ 	[[(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512)]=-1;
+    multipush(R0,R4);
+    // RELEASE_LOCK
+    R1 = 4;
+    R2 = KERN_LOCK;
+    call ACCESS_CONTROL;
+    multipop(R0,R4);
+
+    SP = userSP;
+    ireturn;
+endif;
+
+//parent Heap
+if([PTBR+4]==-1) then
+    //GET_FREE_PAGE
+    multipush(R0,R1,R4);
+    R1=1;
+    call MEMORY_MANAGER;
+    [PTBR+4]=R0;
+    [PTBR+5]="0110";
+    call MEMORY_MANAGER;
+    [PTBR+6]=R0;
+    [PTBR+7]="0110";
+    multipop(R0,R1,R4);
+endif;
+
+
+
+// child pagetb 
+alias newptb R2;
+newptb = PAGE_TABLE_BASE+newPID*20;
+
+// Library Heap Code
+alias i R5;
+i = 0;
+while(i<16) do
+    [newptb + i] = [PTBR + i];
+    [newptb + i + 1] = [PTBR + i + 1];
+    if([PTBR + i] != -1) then
+        [MEMORY_FREE_LIST + [PTBR + i]] = [MEMORY_FREE_LIST + [PTBR + i]] + 1;
+    endif;
+    i=i+2;
+endwhile;
+
+
+//Stack
+multipush(R0,R1,R4,R2);
+R1=1;
+call MEMORY_MANAGER;
+multipop(R2);
+[newptb + 16]=R0;
+[newptb + 17]="0110";
+multipush(R2);
+call MEMORY_MANAGER;
+multipop(R2);
+[newptb + 18]=R0;
+[newptb + 19]="0110";
+
+
+// Child UAPage 
+multipush(R2);
+call MEMORY_MANAGER;
+multipop(R1,R4,R2);
+[PROCESS_TABLE + 16*newPID + 11]=R0;
+multipop(R0);
+
+alias newPCB R3;
+newPCB = PROCESS_TABLE + 16*newPID;
+//Tick
+[newPCB] = 0;
+//PPID
+[newPCB + 2] = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+//USERID
+[newPCB + 3] = [curPCB + 3];
+//STATE
+[newPCB + 4] = CREATED;
+//SWAP Flag
+[newPCB + 6] = [curPCB + 6];
+//Inode index
+[newPCB + 7] = [curPCB + 7];
+//Mode Flag
+[newPCB + 9] = 0;
+//UASwap Status 
+[newPCB + 10] = [curPCB + 10];
+//KPTR
+[newPCB + 12] = 0;
+//UPTR
+[newPCB + 13] = [curPCB + 13];
+
+
+// copy per-process resource table and update SEMAPHORE_TABLE
+alias l R6;
+alias j R7;
+i = [newPCB + 11]*512 + 496;
+l = i + 16;
+j = [curPCB + 11]*512 + 496;
+while (i < l) do
+    [i] = [j];
+    [i+1] = [j+1];
+    if([i] == SEMAPHORE) then
+        [SEMAPHORE_TABLE + [j+1]*4 + 1] = [SEMAPHORE_TABLE + [j+1]*4 + 1] + 1;
+    endif;
+    if([i] == FILE) then
+        // inc open inst count
+        [OPEN_FILE_TABLE + [j+1]*4 + 1] = [OPEN_FILE_TABLE + [j+1]*4 + 1] + 1;
+    endif;
+    i = i + 2;
+    j = j + 2;
+endwhile;
+
+// copy disk map table
+i = DISK_MAP_TABLE + newPID*10;
+l = i + 10;
+j = DISK_MAP_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*10;
+while (i < l) do
+    [i] = [j];
+    i = i + 1;
+    j = j + 1;
+endwhile;
+
+// copy user stack
+i = [newptb+16]*512;
+l = i + 512;
+j = [PTBR+16]*512;
+while (i < l) do
+    [i] = [j];
+    i = i + 1;
+    j = j + 1;
+endwhile;
+// copy user stack
+i = [newptb+18]*512;
+l = i + 512;
+j = [PTBR+18]*512;
+while (i < l) do
+    [i] = [j];
+    i = i + 1;
+    j = j + 1;
+endwhile;
+
+// push BP
+[ [newPCB + 11]*512 ] = BP;
+
+[[(userSP-1)/512 *2 + PTBR] *512 + ((userSP-1)%512)] = newPID;
+[[(userSP-1)/512 *2 + newptb] * 512 + (userSP-1)%512] = 0;
+
+[curPCB + 9] = 0;
+
+multipush(R0);
+// RELEASE_LOCK
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+multipush(R0);
+
+SP = userSP;
+ireturn;

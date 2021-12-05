@@ -1,0 +1,103 @@
+// MOD_5
+
+// ACQUIRE_SCHED_LOCK
+R1 = 2;
+call ACCESS_CONTROL;
+
+alias currentPID R0;
+currentPID = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+
+// // count context switch
+// [75*512 + 2] = [75*512 + 2] + 1;
+
+multipush(BP);
+
+alias process_table_entry R1;
+process_table_entry = PROCESS_TABLE + currentPID*16 ;
+
+[process_table_entry + 12] = SP % 512;
+[process_table_entry + 14] = PTBR;
+[process_table_entry + 15] = PTLR;
+
+alias newPID R4;
+newPID = -1;
+
+
+if(CORE == 0 && [SYSTEM_STATUS_TABLE + 5] != 0) then // paging is ongoing
+
+    if([PROCESS_TABLE + 15*16 + 4] != READY && [PROCESS_TABLE + 15*16 + 4] != CREATED) then
+        // the paging process is blocked
+        newPID = 0; // Idle
+    else
+        newPID = 15;
+    endif;
+else
+    if(CORE == 0 && [SYSTEM_STATUS_TABLE + 7] != 0 && [SYSTEM_STATUS_TABLE + 6] != 14) then
+        newPID = 0; // Idle
+    else
+        if(CORE == 1 && ([SYSTEM_STATUS_TABLE + 5] != 0 || [SYSTEM_STATUS_TABLE + 7] != 0)) then
+            newPID = 14;
+        endif;
+    endif;
+
+    if(newPID == -1) then
+    
+        alias i R3;
+        i = process_table_entry + 16 + 4;
+        while( i < PROCESS_TABLE + 14*16 + 5) do
+            if (([i] == CREATED || [i] == READY) && [i + 2] == 0) then
+                if(CORE == 0 && [i - 3] != 14 && [i - 3] != [SYSTEM_STATUS_TABLE + 6]) then
+                    newPID = [i-3];
+                    break;
+                endif;
+                if(CORE == 1 && [i - 3] != 0 && [i - 3] != 1 && [i - 3] != 2 && [i - 3] != 15 && [i - 3] != [SYSTEM_STATUS_TABLE + 1]) then
+                    newPID = [i-3];
+                    break;
+                endif;
+            endif;
+            i=i+16;
+        endwhile;
+
+        if(CORE == 0 && i > PROCESS_TABLE+14*16+4) then
+            newPID = 0;
+        endif;
+        if(CORE == 1 && i > PROCESS_TABLE+14*16+4) then
+            newPID = 14;
+        endif;
+    endif;
+
+endif;
+
+
+process_table_entry = PROCESS_TABLE + newPID*16;
+SP = [process_table_entry + 11] *512 + [process_table_entry + 12];
+PTBR = [process_table_entry + 14];
+PTLR = [process_table_entry + 15];
+[SYSTEM_STATUS_TABLE + CORE*5 + 1] = newPID;
+
+if([process_table_entry + 4] == CREATED) then
+    BP = [[process_table_entry + 11]*512];
+
+
+    
+    [process_table_entry + 4] = RUNNING;
+    [process_table_entry + 9] = 0;
+    multipush(R1,R2);
+    // RELEASE_LOCK
+    R1 = 4;
+    R2 = SCHED_LOCK;
+    call ACCESS_CONTROL;
+    multipop(R1,R2);
+    SP = [process_table_entry + 13];
+   
+    ireturn;
+endif;
+
+[process_table_entry + 4] = RUNNING;
+multipop(BP);
+
+// RELEASE_LOCK
+R1 = 4;
+R2 = SCHED_LOCK;
+call ACCESS_CONTROL;
+return;

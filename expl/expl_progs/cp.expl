@@ -1,0 +1,57 @@
+int main()
+{
+    decl
+        int temp,fd1,fd2,temp1,temp2;
+        str source,destination,data;
+    enddecl
+    begin
+        temp = exposcall("Write", -2, "Source:");
+        temp = exposcall("Read", -1, source);
+        fd1 = exposcall("Open", source);
+
+        if(fd1 == -1) then
+            temp = exposcall("Write", -2, "FileNotFound!");
+        endif;
+
+        if(fd1 == -2 OR fd1 == -3) then
+            temp = exposcall("Write", -2, "Memory Full!");
+        endif;
+
+        if(fd1 > -1 AND fd1 < 8) then
+
+            temp = exposcall("Write", -2, "Destination:");
+            temp = exposcall("Read", -1, destination);
+            fd2 = exposcall("Open", destination);
+
+            if(fd2 == -1) then
+                temp = exposcall("Write", -2, "FileNotFound!");
+            endif; 
+
+            if(fd2 == -2 OR fd2 == -3) then
+                temp = exposcall("Write", -2, "Memory Full!");
+            endif;
+
+            if(fd2 > -1 AND fd2 < 8) then
+
+                temp1 = 0;
+                temp2 = 0;
+                temp1 = exposcall("Read", fd1, data);
+                while(temp1 == 0 AND temp2 == 0) do
+                    temp2 = exposcall("Write", fd2, data);
+                    temp1 = exposcall("Read", fd1, data);
+                endwhile;
+
+                if(temp2 == -3) then
+                    temp = exposcall("Write", -2, "Permission");
+                    temp = exposcall("Write", -2, "Denied");
+                endif;
+                
+                temp2 = exposcall("Close", fd2);
+            endif;
+            temp1 = exposcall("Close", fd1);
+        endif;
+
+        return 0;
+    end
+    
+}

@@ -1,0 +1,102 @@
+alias userSP R0;
+userSP = SP;
+
+// // count switch to kernel mode
+// [75*512 + 3] = [75*512 + 3] + 1;
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1] *16 + 13] = SP;
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1] *16 +11] *512 -1;
+
+multipush(R0);
+// ACQUIRE_KERN_LOCK
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0);
+
+alias syscallno R1;
+syscallno = [[(userSP-5)/512 *2 +PTBR] *512 + ((userSP-5)%512)];
+
+alias curPCB R2;
+curPCB = PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*16; 
+
+[curPCB + 9] = syscallno;
+
+if(syscallno == 11) then // GetPID
+
+    [[(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512)] = [curPCB + 1];
+
+endif;
+
+if(syscallno == 12) then // GetPPID
+
+    [[(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512)] = [curPCB + 2];
+
+endif;
+
+if(syscallno == 13) then // Wait
+
+    alias argPID R3;
+    argPID = [[(userSP-4)/512 *2 +PTBR] *512 + ((userSP-4)%512)];
+
+    if (argPID < 1 || argPID > 15 || argPID == [SYSTEM_STATUS_TABLE  + CORE*5 + 1] || [PROCESS_TABLE + 16* argPID + 4] == TERMINATED ) then
+
+        [[(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512)] = -1;
+        [curPCB + 9] = 0;
+
+        multipush(R0);
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+        SP = userSP;
+
+        ireturn;
+    endif;
+
+    [curPCB + 4] = WAIT_PROCESS;
+    [curPCB + 5] = argPID;
+
+    multipush(R0,R1,R2,R3);
+    // RELEASE_LOCK
+    R1 = 4;
+    R2 = KERN_LOCK;
+    call ACCESS_CONTROL;
+    call SCHEDULER;
+    // ACQUIRE_KERN_LOCK
+    R1 = 1;
+    call ACCESS_CONTROL;
+    multipop(R0,R1,R2,R3);
+
+    
+    [[(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512)] = 0;
+
+endif;
+
+if(syscallno == 14) then // Signal
+
+    alias i R3;
+    i = PROCESS_TABLE + 16 + 4;
+    while ( i < PROCESS_TABLE + 16*15 + 5) do
+        if( [i] == WAIT_PROCESS && [i+1] == [SYSTEM_STATUS_TABLE  + CORE*5 + 1]) then
+            [i] = READY;
+        endif;
+        i = i+16;
+    endwhile;
+
+    
+    [[(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512)] = 0;
+        
+endif;
+
+[curPCB + 9] = 0;
+
+multipush(R0);
+// RELEASE_LOCK
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+multipop(R0);
+
+SP=userSP;
+ireturn;

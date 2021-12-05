@@ -1,0 +1,124 @@
+// MOD_4
+alias functionNum R1;
+alias currentPID R2;
+
+if(functionNum == DISK_STORE) then
+
+    alias page R3;
+    alias block R4;
+
+    // ACQUIRE_DISK
+    multipush(R1,R2,R3,R4);
+    R1 = 3;
+    call RESOURCE_MANAGER;
+    multipop(R1,R2,R3,R4);
+
+    [DISK_STATUS_TABLE + 1] = 1;
+    [DISK_STATUS_TABLE + 2] = R3;
+    [DISK_STATUS_TABLE + 3] = R4;
+
+    store(R3,R4);
+
+    [PROCESS_TABLE + currentPID*16 + 4] = WAIT_DISK;
+
+    multipush(R1,R2,R3,R4);
+    // RELEASE_LOCK
+    R1 = 4;
+    R2 = KERN_LOCK;
+    call ACCESS_CONTROL;
+    call SCHEDULER;
+    // ACQUIRE_KERN_LOCK
+    R1 = 1;
+    call ACCESS_CONTROL;
+    multipop(R1,R2,R3,R4);
+
+    return;
+
+endif;
+
+if(functionNum == DISK_LOAD) then
+   
+    //acquire disk
+    multipush(R1,R2,R3,R4);
+    R1=3;
+    call RESOURCE_MANAGER;
+    multipop(R1,R2,R3,R4);
+
+    //set dst
+  
+    [DISK_STATUS_TABLE + 1]=0;
+    [DISK_STATUS_TABLE + 2]=R3;
+    [DISK_STATUS_TABLE + 3]=R4;
+  
+    
+    load(R3,R4);
+    
+    [PROCESS_TABLE + currentPID*16 +4]=WAIT_DISK;
+    
+    multipush(R1,R2,R3,R4);
+    // RELEASE_LOCK
+    R1 = 4;
+    R2 = KERN_LOCK;
+    call ACCESS_CONTROL;
+    call SCHEDULER;
+    // ACQUIRE_KERN_LOCK
+    R1 = 1;
+    call ACCESS_CONTROL;
+    multipop(R1,R2,R3,R4);
+ 
+    return;
+endif;
+
+if(functionNum == TERMINAL_WRITE) then
+
+    // acquire terminal
+    multipush(R1,R2,R3);
+    R1=8;
+    R2=[SYSTEM_STATUS_TABLE  + CORE*5 +1];
+    call RESOURCE_MANAGER;
+
+    multipop(R1,R2,R3);
+
+    print R3;
+
+    //RELEASE_TERMINAL
+    multipush(R1,R2,R3);
+    R1=9;
+    R2=[SYSTEM_STATUS_TABLE  + CORE*5 +1];
+    call RESOURCE_MANAGER;
+
+    multipop(R1,R2,R3);
+    return;
+endif;
+
+if(functionNum == TERMINAL_READ) then
+
+    // acquire terminal
+    multipush(R1,R2,R3);
+    R1=8;
+    R2=[SYSTEM_STATUS_TABLE  + CORE*5 +1];
+    call RESOURCE_MANAGER;
+
+    multipop(R1,R2,R3);
+
+    read;
+
+    [PROCESS_TABLE + 16*currentPID + 4]=WAIT_TERMINAL;
+
+    multipush(R1,R2,R3);
+    // RELEASE_LOCK
+    R1 = 4;
+    R2 = KERN_LOCK;
+    call ACCESS_CONTROL;
+    call SCHEDULER;
+    // ACQUIRE_KERN_LOCK
+    R1 = 1;
+    call ACCESS_CONTROL;
+    multipop(R1,R2,R3);
+
+    //store input from input buffer to the argument variable
+    alias physicalAddrReadVal R4;
+    physicalAddrReadVal = [( R3 /512) *2 +PTBR]*512 + R3%512 ;
+    [physicalAddrReadVal] = [PROCESS_TABLE + 16*currentPID + 8];
+    return;
+endif; 

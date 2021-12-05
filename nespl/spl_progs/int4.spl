@@ -1,0 +1,275 @@
+alias userSP R0;
+userSP = SP;
+
+alias curPCB R2;
+curPCB = PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*16;
+
+// // count switch to kernel mode
+// [75*512 + 3] = [75*512 + 3] + 1;
+
+[curPCB + 13] = SP;
+SP = [curPCB +11] *512 -1;
+
+alias syscallno R1;
+syscallno = [[(userSP-5)/512 *2 +PTBR] *512 + ((userSP-5)%512)];
+
+alias retvalue R9;
+retvalue = [(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512);
+ 
+[curPCB + 9] = syscallno;
+
+multipush(R0,R1,R2,R9);
+// ACQUIRE_KERN_LOCK
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0,R1,R2,R9);
+
+if(syscallno == 1) then // Create File
+
+    alias filename R3;
+    alias permission R4;
+    filename = [[(userSP-4)/512 *2 +PTBR] *512 + ((userSP-4)%512)];
+    permission = [[(userSP-3)/512 *2 +PTBR] *512 + ((userSP-3)%512)];
+
+    // return 0 if file exists
+    alias i R5;
+    alias inode R6;
+    i = INODE_TABLE + 1;
+    inode = -1;
+    while (i < INODE_TABLE + 960) do // 60*16
+
+        if([i] == filename) then    // file already exists
+
+            [retvalue] = 0;
+            [curPCB + 9] = 0;
+
+            multipush(R0);
+            // RELEASE_LOCK
+            R1 = 4;
+            R2 = KERN_LOCK;
+            call ACCESS_CONTROL;
+            multipop(R0);
+
+            SP = userSP;
+
+            ireturn;
+
+        endif;
+
+        if([i] == -1 && inode == -1) then
+            inode = (i - 1 - INODE_TABLE)/16;
+        endif;
+
+        i = i + 16;
+
+    endwhile;
+
+    // inode table full return -1
+    if(inode == -1) then
+
+        [retvalue] = -1;
+        [curPCB + 9] = 0;
+
+        multipush(R0);
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+
+        SP = userSP;
+
+        ireturn;
+
+    endif;
+    
+
+
+    alias inode_table_entry R7;
+    inode_table_entry = INODE_TABLE + inode*16;
+
+    [inode_table_entry] = DATA;
+    [inode_table_entry + 1] = filename;
+    [inode_table_entry + 2] = 0;
+    [inode_table_entry + 3] = [curPCB + 3];
+    [inode_table_entry + 4] = permission;
+    [inode_table_entry + 8] = -1;
+    [inode_table_entry + 9] = -1;
+    [inode_table_entry + 10] = -1;
+    [inode_table_entry + 11] = -1;
+
+    alias root_file_entry R8;
+    root_file_entry = ROOT_FILE + inode*8;
+
+    [root_file_entry] = filename;
+    [root_file_entry + 1] = 0;
+    [root_file_entry + 2] = DATA;
+    [root_file_entry + 3] = [USER_TABLE + [curPCB + 3]*2];
+    [root_file_entry + 4] = permission;
+
+    [retvalue] = 0;
+
+endif;
+
+if(syscallno == 4) then // Delete File
+
+    alias filename R3;
+    filename = [[(userSP-4)/512 *2 +PTBR] *512 + ((userSP-4)%512)];
+
+    alias inode R4;
+    inode = 0;
+    while(inode < 60) do
+        
+        if([INODE_TABLE + inode*16 + 1] == filename) then
+            break;
+        endif;
+
+        inode = inode + 1;
+
+    endwhile;
+
+    // file doesnt exist
+    if (inode >= 60) then
+
+        [retvalue] = 0;
+        [curPCB + 9] = 0;
+
+        multipush(R0);
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+
+        SP = userSP;
+
+        ireturn;
+
+    endif;
+    
+    alias inode_table_entry R5;
+    inode_table_entry = INODE_TABLE + inode*16;
+
+    // permission denied
+    if([inode_table_entry] != DATA || ([inode_table_entry + 4] == 0 && [curPCB + 3] != 1 && [curPCB + 3] != [inode_table_entry + 3])) then
+
+        [retvalue] = -1;
+        [curPCB + 9] = 0;
+
+        multipush(R0);
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+
+        SP = userSP;
+
+        ireturn;
+
+    endif;
+
+    // Acquire_INODE
+    multipush(R0,R1,R2,R3,R4,R5);
+    R1 = 4;
+    R3 = inode;
+    R2 = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+    call RESOURCE_MANAGER;
+    multipop(R0,R1,R2,R3,R4,R5);
+
+    // file is open
+    if([FILE_STATUS_TABLE + inode*4 + 1] != -1) then
+
+        //release inode
+        multipush(R0,R1,R2,R3,R4,R5);
+        R1 = 5;
+        R3 = inode;
+        R2 = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+        call RESOURCE_MANAGER;
+        multipop(R0,R1,R2,R3,R4,R5);        
+
+        [retvalue] = -2;
+        [curPCB + 9] = 0;
+
+        multipush(R0);
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+
+        SP = userSP;
+
+        ireturn;
+
+    endif;
+
+    // release disk blocks and clear buffer
+    alias i R6;
+    i = inode_table_entry + 8;
+    while ( i < inode_table_entry + 12) do
+
+        if([i] != -1 ) then
+            alias bt R7;
+            bt = BUFFER_TABLE + ([i] % 4)*4;
+            // if dirty bit set reset it
+            if([bt] == [i] && [bt + 1] == 1) then 
+                [bt + 1] = 0;
+            endif;
+
+            //release blocks
+            multipush(R0,R1,R2,R3,R4,R5,R6);
+            R1 = 4;
+            R2 = [i];
+            R3 = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+            call MEMORY_MANAGER;
+            multipop(R0,R1,R2,R3,R4,R5,R6);
+        endif;
+
+        i = i + 1;
+
+    endwhile;
+
+    // invalidate inode table entry
+    [inode_table_entry] = -1;
+    [inode_table_entry + 1] = -1;
+    [inode_table_entry + 2] = 0;
+    [inode_table_entry + 3] = -1;
+    [inode_table_entry + 4] = -1;
+    
+
+    // invalidate root_file_entry
+
+    alias root_file_entry R6;
+    root_file_entry = ROOT_FILE + inode*8;
+
+    [root_file_entry] = -1;
+    [root_file_entry + 1] = 0;
+    [root_file_entry + 2] = -1;
+    [root_file_entry + 3] = -1;
+    [root_file_entry + 4] = -1;
+
+
+    //release inode
+    multipush(R0,R1,R2,R3,R4,R5);
+    R1 = 5;
+    R3 = inode;
+    R2 = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+    call RESOURCE_MANAGER;
+    multipop(R0,R1,R2,R3,R4,R5); 
+
+    [retvalue] = 0;
+
+endif;
+
+[curPCB + 9] = 0;
+multipush(R0);
+// RELEASE_LOCK
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+multipop(R0);
+
+SP = userSP;
+
+ireturn;

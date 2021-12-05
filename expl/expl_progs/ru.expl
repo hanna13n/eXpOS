@@ -1,0 +1,52 @@
+int main(){
+    decl
+        int temp1, temp2, temp3, fd, i;
+        str filename, username, data;
+    enddecl
+    begin
+
+        temp1 = exposcall("Write", -2, "Username:");
+        temp1 = exposcall("Read", -1, username);
+
+        fd = exposcall("Open","root");
+
+        if((fd == -2) OR (fd == -3)) then
+            temp1 = exposcall("Write", -2, "MemoryFull!");
+        endif;
+
+        if(fd > -1 AND fd < 8) then
+
+            temp1 = 0;
+            temp2 = exposcall("Seek", fd, 3);            
+            while(temp1 == 0 AND temp2 == 0) do 
+                temp1 = exposcall("Read", fd, data);  
+                if(temp1 == 0 AND data == username) then
+                    temp2 = exposcall("Seek", fd, -4); 
+                    temp1 = exposcall("Read", fd, filename);
+                    temp3 = exposcall("Delete", filename);
+                    temp1 = exposcall("Write", -2, filename);
+                    if(temp3 == 0) then
+                        temp1 = exposcall("Write", -2, "Deleted!");
+                    endif;
+                    if(temp3 == -2) then
+                        temp1 = exposcall("Write", -2, "is Open!");
+                        temp1 = exposcall("Write", -2, "UnableToDelete!");
+                    endif;
+                    if(temp3 == -1) then
+                        temp1 = exposcall("Write", -2, "DeletionFailed");
+                    endif;
+                    temp2 = exposcall("Seek", fd, 10);
+                else
+                    if(temp1 == 0) then
+                        temp2 = exposcall("Seek", fd, 7);
+                    else
+                        break;
+                    endif;
+                endif;
+            endwhile;
+        endif;
+        temp1 = exposcall("Close", fd);
+    return 0;
+    end
+
+}

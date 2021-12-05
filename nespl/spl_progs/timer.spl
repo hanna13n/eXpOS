@@ -1,0 +1,103 @@
+// // count switch to kernel mode
+// [75*512 + 3] = [75*512 + 3] + 1;
+
+[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE  + CORE*5 + 1] * 16) + 13] = SP;
+
+// Setting SP to UArea Page number * 512 - 1
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE  + CORE*5 + 1] * 16) + 11] * 512 - 1;
+backup;
+
+alias currentPID R0;
+currentPID = [SYSTEM_STATUS_TABLE + CORE*5 + 1];
+
+alias process_table_entry R1;
+process_table_entry = PROCESS_TABLE + currentPID*16 ;
+
+// if swapping is initiated
+if(CORE == 0 && ([SYSTEM_STATUS_TABLE + 5] == SWAP_IN || [SYSTEM_STATUS_TABLE + 5] == SWAP_OUT)) then
+
+    if(currentPID == 15 && [SYSTEM_STATUS_TABLE + 5] == SWAP_OUT) then
+        // SWAP_OUT
+        multipush(R0,R1);
+        // ACQUIRE_KERN_LOCK
+        R1 = 1;
+        call ACCESS_CONTROL;
+        R1 = 1;
+        R2 = currentPID;
+        call PAGER_MODULE;
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0,R1);
+    else
+        if(currentPID == 15 && [SYSTEM_STATUS_TABLE + 5] == SWAP_IN) then
+            // SWAP_IN
+            multipush(R0,R1);
+            // ACQUIRE_KERN_LOCK
+            R1 = 1;
+            call ACCESS_CONTROL;
+            R1 = 2;
+            R2 = currentPID;
+            call PAGER_MODULE;
+            // RELEASE_LOCK
+            R1 = 4;
+            R2 = KERN_LOCK;
+            call ACCESS_CONTROL;
+            multipop(R0,R1);
+        endif;
+        if(currentPID == 0) then    // Idle process 
+            goto context_switch;
+        endif;
+    endif;
+
+else    // swapping not on now
+
+    // MEM_FREE_COUNT < 4
+    if([SYSTEM_STATUS_TABLE + 2] < MEM_LOW) then
+
+        // Swap Out to be invoked during next Timer Interrupt 
+        [SYSTEM_STATUS_TABLE + 5] = SWAP_OUT; // paging status
+    
+    else
+
+        // Swapped out processes present
+        if([SYSTEM_STATUS_TABLE + 4] != 0) then
+
+            // Swap In to be invoked during next Timer Interrupt
+            
+                alias i R2;
+                i = PROCESS_TABLE + 3*16 + 6;
+                while(i < PROCESS_TABLE + 15*16 + 7) do
+                    if([i] == 1 && [i - 2] == READY && ([SYSTEM_STATUS_TABLE + 2] > MEM_HIGH || [i-6 ] > MAX_TICK)) then
+                        [SYSTEM_STATUS_TABLE + 5] = SWAP_IN;
+                        break;
+                    endif;
+                    i = i + 16;
+                endwhile;
+
+        endif;  
+    endif;
+
+endif;
+        
+
+[process_table_entry + 4] = READY;
+
+alias i R4;
+i = PROCESS_TABLE;
+while( i < PROCESS_TABLE + 15*16 + 1) do
+    [i]=[i] + 1;
+    i = i+16;
+endwhile;
+
+context_switch:
+
+call SCHEDULER;
+
+restore;
+
+SP = [PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE  + CORE*5 + 1] * 16) + 13];
+[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16 ) + 9] = 0;
+
+ireturn;

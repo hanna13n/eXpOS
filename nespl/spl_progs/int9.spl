@@ -1,0 +1,160 @@
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1] * 16 + 9] = 9;
+alias userSP R0;
+userSP = SP;
+
+// // count switch to kernel mode
+// [75*512 + 3] = [75*512 + 3] + 1;
+
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1] *16 + 13] = SP;
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1] *16 +11] *512 -1;
+
+multipush(R0);
+// ACQUIRE_KERN_LOCK
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0);
+
+alias filename R1;
+filename =  [[(userSP-4)/512 *2 + PTBR]*512 + (userSP-4)%512];
+
+alias i R2;
+i=0;
+while(i<MAX_FILE_NUM) do
+    if( [INODE_TABLE + i*16 +1] == filename ) then
+        break;
+    endif;
+    i=i+1;
+endwhile;
+
+if(i>=MAX_FILE_NUM || [INODE_TABLE +i*16] != EXEC ) then
+    alias physicalAddrRetVal R3;
+ 	physicalAddrRetVal = [(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512);
+ 	[physicalAddrRetVal]=-1;
+
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1] * 16 + 9] = 0;
+
+    multipush(R0);
+    // RELEASE_LOCK
+    R1 = 4;
+    R2 = KERN_LOCK;
+    call ACCESS_CONTROL;
+    multipop(R0);
+
+    SP = userSP;
+    ireturn;
+endif;
+
+// EXIT_PROCESS
+multipush(R0,R1,R2);
+R1=3;
+R2=[SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+call PROCESS_MANAGER;
+multipop(R0,R1,R2);
+
+alias UAPage R3;
+// UAPage from pcb
+UAPage = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*16 + 11];
+
+//reclaim the same UAPage
+
+//inc mem_free_list of the UAPage
+[MEMORY_FREE_LIST + UAPage] = [MEMORY_FREE_LIST + UAPage] + 1;
+//dec mem_free_count
+[SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2]-1;
+
+SP = UAPage*512-1;
+
+//per-process resource table
+alias k R7;
+k=UAPage*512 + 496;
+while(k < UAPage*512 + 512) do
+    [k] = -1;
+    k=k+2;
+endwhile;
+
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*16 + 4] = RUNNING;
+//inode index
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*16 + 7] = i;
+
+
+
+// Library
+[PTBR + 0]=63;
+[PTBR + 1]="0100";
+[PTBR + 2]=64;
+[PTBR + 3]="0100";
+
+
+
+multipush(R0,R1,R2,R3,R4);
+R1=1;
+// Heap
+[PTBR + 4]=-1;
+[PTBR + 5]="0000";
+[PTBR + 6]=-1;
+[PTBR + 7]="0000";
+
+// Stack
+call MEMORY_MANAGER;
+[PTBR + 16]=R0;
+[PTBR + 17]="0110";
+R1=1;
+call MEMORY_MANAGER;
+[PTBR + 18]=R0;
+[PTBR + 19]="0110";
+multipop(R0,R1,R2,R3,R4);
+
+// Code
+
+//get code page
+multipush(R0,R1,R2,R3,R4);
+R1=5;
+R2=[INODE_TABLE + i*16 + 8];
+call MEMORY_MANAGER;
+[PTBR + 8]=R0;
+[PTBR + 9]="0100";
+multipop(R0,R1,R2,R3,R4);
+
+//invalidate page table entries
+alias j R5;
+j=10;
+while(j<16) do
+    [PTBR + j]=-1;
+    [PTBR + j+1]="0000";
+    j=j+2;
+endwhile;
+
+// initialize disk map table
+
+alias disk_map_table R6;
+disk_map_table = DISK_MAP_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*10 ;
+
+// Heap
+[disk_map_table + 2]=-1;
+[disk_map_table + 3]=-1;
+
+//code
+j=0;
+while(j<4) do
+    [disk_map_table + 4 + j]=[INODE_TABLE + i*16 + 8 + j];
+    j=j+1;
+endwhile;
+
+// Stack
+[disk_map_table + 8]=-1;
+[disk_map_table + 9]=-1;
+
+[[PTBR + 16]*512] = [[PTBR +8]*512+1];
+multipush(R0);
+// RELEASE_LOCK
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+multipop(R0);
+SP=8*512;
+
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1] *16 + 9] = 0;
+
+ireturn;

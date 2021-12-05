@@ -1,0 +1,230 @@
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1] * 16 + 9] = 5;
+
+alias curPCB R1;
+curPCB = PROCESS_TABLE + [SYSTEM_STATUS_TABLE  + CORE*5 + 1]*16;
+
+// // count switch to kernel mode
+// [75*512 + 3] = [75*512 + 3] + 1;
+
+alias userSP R0;
+userSP = SP;
+
+[curPCB + 13] = SP;
+SP = [curPCB + 11] *512 -1;
+
+multipush(R0,R1);
+// ACQUIRE_KERN_LOCK
+R1 = 1;
+call ACCESS_CONTROL;
+multipop(R0,R1);
+ 
+alias fileDescriptor R4;
+fileDescriptor = [[(userSP-4)/512 *2 +PTBR] *512 + ((userSP-4)%512)];
+
+alias retvalue R8;
+retvalue = [(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512);
+ 
+if(fileDescriptor != -2) then
+
+    if(fileDescriptor < 0 || fileDescriptor > 7) then   // invalid fd
+
+        [retvalue] = -1;   
+        [curPCB + 9] = 0;
+        multipush(R0);
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+        SP=userSP;
+        ireturn;
+
+	endif;
+
+    alias rtentry R2;
+    rtentry = [curPCB + 11]*512 + 496 + fileDescriptor*2;
+  
+    if ([rtentry] != FILE) then
+        [retvalue] = -1;   
+        [curPCB + 9] = 0;
+        multipush(R0);
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+        SP=userSP;
+
+        ireturn;
+    endif;
+
+    alias oftentry R3;
+    alias inode R5;
+	alias inode_table_entry R7;
+	
+
+    oftentry = OPEN_FILE_TABLE + [rtentry + 1]*4;
+    inode = [oftentry];
+    inode_table_entry = INODE_TABLE + inode * 16;
+    
+	// permission denied
+	if( [inode_table_entry + 4] == 0 && [curPCB + 3] != 1 && [curPCB + 3] != [inode_table_entry + 3]) then
+
+        [retvalue] = -3;   
+        [curPCB + 9] = 0;
+        multipush(R0);
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+        SP=userSP;
+
+        ireturn;
+
+	endif;		
+    
+    // Acquire_INODE
+    multipush(R0,R1,R2,R3,R4,R5,R7);
+    R1 = 4;
+    R2 = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+    R3 = inode;
+    call RESOURCE_MANAGER;	
+
+    if (R0 == -1) then  // file was deleted
+
+        multipop(R0,R1,R2,R3,R4,R5,R7);
+        [retvalue] = -1;   
+        [curPCB + 9] = 0;
+        multipush(R0);
+        // RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+        SP=userSP;
+
+        ireturn; 
+
+    else
+
+        multipop(R0,R1,R2,R3,R4,R5,R7);
+
+    endif;
+
+	alias lseek R6;
+	lseek = oftentry + 2;
+
+	if([lseek] == MAX_FILE_SIZE) then // file size 2048 reached
+
+		// RELEASE_INODE
+		multipush(R0,R1,R2,R3,R4,R5,R6,R7);
+		R1 = 5;
+		R2 = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+		R3 = inode;
+		call RESOURCE_MANAGER;
+		multipop(R0,R1,R2,R3,R4,R5,R6,R7);
+
+		[retvalue] = -2;   
+		[curPCB + 9] = 0;
+        multipush(R0);
+		// RELEASE_LOCK
+        R1 = 4;
+        R2 = KERN_LOCK;
+        call ACCESS_CONTROL;
+        multipop(R0);
+		SP=userSP;
+
+        ireturn;  
+
+    endif;	
+
+	if([lseek] % 512 == 0 && [lseek] == [inode_table_entry + 2] ) then
+
+		// get free block
+		multipush(R0,R1,R2,R3,R4,R5,R6,R7);
+		R1 = 3;
+		call MEMORY_MANAGER;
+		multipop(R1,R2,R3,R4,R5,R6,R7);
+
+		if(R0 == -1) then // no free block found
+
+            // RELEASE_INODE
+            multipush(R1,R2,R3,R4,R5,R6,R7);
+            R1 = 5;
+            R2 = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+            R3 = inode;
+            call RESOURCE_MANAGER;
+            multipop(R0,R1,R2,R3,R4,R5,R6,R7);
+
+            [retvalue] = -2;   
+            [curPCB + 9] = 0;
+            multipush(R0);
+            // RELEASE_LOCK
+            R1 = 4;
+            R2 = KERN_LOCK;
+            call ACCESS_CONTROL;
+            multipop(R0);
+            SP=userSP;
+
+        ireturn;  
+		else
+			[inode_table_entry + 8 + ([lseek] / 512)] = R0;
+			multipop(R0);
+		endif;
+	endif;
+
+    // BUFFERED_WRITE
+    multipush(R0,R1,R2,R3,R4,R5,R6,R7);
+    R1 = 1;
+    R2 = [inode_table_entry + 8 + ([lseek]/512)];
+    R3 = [lseek] % 512;
+    R4 = [ [(userSP-3)/512 *2 +PTBR] *512 + ((userSP-3)%512) ];
+    call FILE_MANAGER;
+    multipop(R0,R1,R2,R3,R4,R5,R6,R7);	
+
+	// inc file size in ROOT_FILE and INODE_TABLE
+	if([lseek] == [inode_table_entry + 2] ) then
+		[inode_table_entry + 2] = [inode_table_entry + 2] + 1;
+		[ROOT_FILE + inode * 8 + 1] = [ROOT_FILE + inode * 8 + 1] + 1;
+	endif;
+
+	[lseek] = [lseek] + 1;
+
+    // RELEASE_INODE
+    multipush(R0,R1,R2,R3,R4,R5,R6,R7);    
+    R1 = 5;
+    R2 = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+    R3 = inode;
+    call RESOURCE_MANAGER;
+    multipop(R0,R1,R2,R3,R4,R5,R6,R7);
+
+ 	[[(userSP-1)/512 *2 +PTBR] *512 + ((userSP-1)%512)] = 0;
+
+
+else
+ 	alias word R5;
+ 	word = [ [(userSP-3)/512 *2 +PTBR] *512 + ((userSP-3)%512) ];
+
+	//print word;
+	
+	multipush(R0,R1,R4,R5);
+	R1 = 3;
+	R2 = [SYSTEM_STATUS_TABLE  + CORE*5 + 1];
+	R3 = word;
+ 	call DEVICE_MANAGER;
+	multipop(R0,R1,R4,R5);
+
+ 	[retvalue]=0;
+endif;
+
+[curPCB + 9] = 0;
+multipush(R0);
+// RELEASE_LOCK
+R1 = 4;
+R2 = KERN_LOCK;
+call ACCESS_CONTROL;
+multipop(R0);
+SP=userSP; 
+
+ireturn;

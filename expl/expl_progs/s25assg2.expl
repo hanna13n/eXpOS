@@ -1,0 +1,33 @@
+int main()
+{
+    decl
+        int temp, fd, i;
+    enddecl
+    begin
+        fd=exposcall("Open","nos.dat");
+        if(fd == -1) then
+            temp=exposcall("Write",-2,"FileNotFound!");
+         
+        endif;
+        if((fd == -2) OR (fd == -3)) then
+            temp=exposcall("Write",-2,"Memory Full!");
+        endif;
+        if(fd > -1 AND fd < 8) then
+            i = 2000;
+            temp = exposcall("Seek", fd, 1101);
+            while(i < 2514) do
+                temp = exposcall("Write", fd, i);
+                i = i+1;
+            endwhile;
+            temp = 0;
+            temp = exposcall("Seek", fd, -1);
+            while(temp == 0) do
+                temp = exposcall("Read", fd, i);
+                temp = exposcall("Write", -2, i);
+                temp = exposcall("Seek", fd, -2);
+            endwhile;
+        endif;
+        temp=exposcall("Close",fd);
+        return 0;
+    end
+}

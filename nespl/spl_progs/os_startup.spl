@@ -1,0 +1,131 @@
+//Module 7-BootModule
+loadi(54,67);
+loadi(55,68);
+
+
+//Idle
+loadi(69,11);
+
+
+
+// // init vars
+// [75*512] = 128;
+// [75*512 + 1] = 0;
+// [75*512 + 2] = 0;
+// [75*512 + 3] = 0;
+
+SP=76*512-1;
+call BOOT_MODULE;
+
+PTLR=10;
+//Idle
+PTBR=PAGE_TABLE_BASE;
+
+alias i R0;
+i = PTBR;
+while(i < PTBR + 20) do
+    [i] = -1;
+    [i + 1] = "0000";
+    i = i + 2;
+endwhile;
+
+//Code
+[PTBR + 8] = 69;
+[PTBR + 9] = "0100";
+
+//Stack
+[PTBR + 16] = 70;
+[PTBR + 17] = "0110";
+
+//Process Table Idle
+[PROCESS_TABLE] = 0;
+[PROCESS_TABLE + 1] = 0;          //pid   
+[PROCESS_TABLE + 3] = 0;          //USERID    
+[PROCESS_TABLE + 4] = RUNNING;    //STATE
+[PROCESS_TABLE + 11] = 76;        //UA PG NO.
+[PROCESS_TABLE + 12] = 0;         //KPTR     
+[PROCESS_TABLE + 13] = 8*512;     //UPTR      
+[PROCESS_TABLE + 14] = PAGE_TABLE_BASE; //PTBR    
+[PROCESS_TABLE + 15] = 10;        //PTLR   
+
+//Idle UserStack
+[70*512] = [69*512+1];
+
+
+// Swapper Daemon
+PTBR = PAGE_TABLE_BASE + 20*15;
+i = PTBR;
+while(i < PTBR + 20) do
+    [i] = -1;
+    [i + 1] = "0000";
+    i = i + 2;
+endwhile;
+
+
+//Code
+[PTBR + 8] = 69;
+[PTBR + 9] = "0100";
+
+
+//Stack
+[PTBR + 16] = 81;
+[PTBR + 17] = "0110";
+
+//Process Table Idle
+i = PROCESS_TABLE + 15*16;
+[i] = 0;
+[i + 1] = 15;          //pid   
+[i + 3] = 0;          //USERID    
+[i + 4] = CREATED;    //STATE
+[i + 11] = 82;        //UA PG NO.
+[i + 12] = 0;         //KPTR     
+[i + 13] = 8*512;     //UPTR      
+[i + 14] = PAGE_TABLE_BASE + 20*15; //PTBR    
+[i + 15] = 10;        //PTLR   
+
+//Daemon UserStack
+[81*512] = [69*512+1];
+
+
+// Idle 2
+PTBR = PAGE_TABLE_BASE + 20*14;
+i = PTBR;
+while(i < PTBR + 20) do
+    [i] = -1;
+    [i + 1] = "0000";
+    i = i + 2;
+endwhile;
+
+
+//Code
+[PTBR + 8] = 69;
+[PTBR + 9] = "0100";
+
+
+//Stack
+[PTBR + 16] = 83;
+[PTBR + 17] = "0110";
+
+//Process Table Idle
+i = PROCESS_TABLE + 14*16;
+[i] = 0;
+[i + 1] = 14;          //pid   
+[i + 3] = 0;          //USERID    
+[i + 4] = RUNNING;    //STATE
+[i + 11] = 84;        //UA PG NO.
+[i + 12] = 0;         //KPTR     
+[i + 13] = 8*512;     //UPTR      
+[i + 14] = PAGE_TABLE_BASE + 20*14; //PTBR    
+[i + 15] = 10;        //PTLR   
+
+
+PTBR = PAGE_TABLE_BASE;
+SP = 8*512;
+
+[SYSTEM_STATUS_TABLE + 1] = 0;
+[SYSTEM_STATUS_TABLE + 6] = 14;
+[SYSTEM_STATUS_TABLE + 7] = 0;
+
+start;
+
+ireturn;
